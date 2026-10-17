@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111317">
+    <title>Threat Forge - Naruto 5e Enemy Builder</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand"><span class="brand-seal">敵</span><div><strong>Threat Forge</strong><small>Naruto 5e adversary workshop</small></div></div>
+        <div class="header-actions">
+          <button id="new-enemy" class="button ghost">New enemy</button>
+          <label class="button ghost file-button">Import JSON<input id="import-json" type="file" accept="application/json,.json"></label>
+          <button id="export-json" class="button ghost">Export JSON</button>
+          <button id="save-roster" class="button primary">Save to roster</button>
+        </div>
+      </header>
+
+      <aside class="sidebar">
+        <div class="enemy-avatar" id="enemy-avatar">?</div>
+        <h1 id="sidebar-name">Unnamed adversary</h1>
+        <p id="sidebar-build">Standard · Generalist</p>
+        <div class="level-chip"><span>Level</span><strong id="sidebar-level">5</strong></div>
+        <nav id="step-nav" aria-label="Enemy builder sections">
+          <button class="nav-step active" data-step="forge"><span>01</span>Core build</button>
+          <button class="nav-step" data-step="abilities"><span>02</span>Ability array</button>
+          <button class="nav-step" data-step="traits"><span>03</span>Traits</button>
+          <button class="nav-step" data-step="jutsu"><span>04</span>Jutsu</button>
+          <button class="nav-step" data-step="arsenal"><span>05</span>Arsenal</button>
+          <button class="nav-step" data-step="tactics"><span>06</span>Tactics</button>
+          <button class="nav-step" data-step="statblock"><span>07</span>Statblock</button>
+          <button class="nav-step" data-step="encounter"><span>08</span>Encounter</button>
+        </nav>
+        <div class="sidebar-footer"><span id="save-status">Loading rules…</span><small id="source-version"></small></div>
+      </aside>
+
+      <main>
+        <section class="hero">
+          <div><p class="eyebrow">Dungeon Master workspace</p><h2 id="page-title">Build the threat</h2><p id="page-subtitle">Set the enemy’s job, scale, and identity.</p></div>
+          <div class="hero-metric"><span>Suggested damage</span><strong id="hero-damage">—</strong><small>per action</small></div>
+        </section>
+        <div id="notice" class="notice hidden" role="status"></div>
+
+        <section class="step-panel active" data-panel="forge">
+          <div class="section-heading"><div><span>Core build</span><h3>Identity and encounter role</h3></div><p>Official tables drive the starting numbers. Fine-tuning stays visible and reversible.</p></div>
+          <div class="form-grid three">
+            <label class="span-two">Adversary name<input data-field="name" autocomplete="off" placeholder="e.g. Silent Mist Hunter"></label>
+            <label>Size<select data-field="size"><option>Tiny</option><option>Small</option><option selected>Medium</option><option>Large</option><option>Huge</option><option>Gargantuan</option></select></label>
+            <label>Level<input data-field="level" type="number" min="-3" max="30"></label>
+            <label>Class<select data-field="enemyClass" id="class-select"></select></label>
+            <label>Role<select data-field="role" id="role-select"></select></label>
+            <label>Rank<select data-field="rank" id="rank-select"></select></label>
+            <label>Clan / origin<select data-field="clan" id="clan-select"></select></label>
+            <label>Affiliation<select data-field="affiliation" id="affiliation-select"></select></label>
+            <label>Class-mod tier<select data-field="classModTier"><option>None</option><option>Tier 1</option><option>Tier 2</option><option>Tier 3</option></select></label>
+            <label>Players used for scaling<input data-field="playerCount" type="number" min="1" max="12"></label>
+            <label>Armor profile<select data-field="armor"><option>Light</option><option>Medium</option><option>Heavy</option><option>Caster</option></select></label>
+            <label>Casting ability<select data-field="castingAbility"><option>Int</option><option>Wis</option><option>Cha</option></select></label>
+          </div>
+          <label class="wide-label">Concept<textarea data-field="concept" rows="3" placeholder="Appearance, personality, objective, and fighting style…"></textarea></label>
+          <div id="core-stat-strip" class="stat-strip"></div>
+          <div id="role-advice" class="advice-grid"></div>
+        </section>
+
+        <section class="step-panel" data-panel="abilities">
+          <div class="section-heading"><div><span>Ability array</span><h3>Assign strengths and weaknesses</h3></div><p>The official array changes with level and adversary class. Assign each value once, then apply deliberate adjustments.</p></div>
+          <div id="ability-array" class="ability-array"></div>
+          <div class="subsection"><h4>Saving throw training</h4><p>Untrained saves receive half proficiency, matching the source sheet. Toggle full proficiency here.</p><div id="save-training" class="toggle-grid"></div></div>
+          <div class="subsection"><h4>Skill training</h4><div class="toolbar"><input id="skill-search" type="search" placeholder="Search skills…"></div><div id="skill-grid" class="skill-grid"></div></div>
+        </section>
+
+        <section class="step-panel" data-panel="traits">
+          <div class="section-heading"><div><span>Trait library</span><h3>Give the enemy a clear mechanical identity</h3></div><p>The guide recommends one or two traits for the primary job, then using remaining slots for a secondary purpose.</p></div>
+          <div id="trait-budget" class="budget-banner"></div>
+          <div class="catalogue-layout">
+            <div>
+              <div class="toolbar"><input id="trait-search" type="search" placeholder="Search 900+ traits…"><select id="trait-rank"><option value="">All ranks</option></select><select id="trait-category"><option value="">All categories</option></select></div>
+              <div id="trait-results" class="catalogue-results"></div>
+            </div>
+            <aside><h4>Selected traits</h4><div id="selected-traits" class="selected-stack"></div></aside>
+          </div>
+        </section>
+
+        <section class="step-panel" data-panel="jutsu">
+          <div class="section-heading"><div><span>Jutsu library</span><h3>Plan every part of the turn</h3></div><p>Choose a dependable action, a bonus action worth using, and a reaction the party can trigger.</p></div>
+          <div id="action-coverage" class="coverage-strip"></div>
+          <div class="catalogue-layout">
+            <div>
+              <div class="toolbar"><input id="jutsu-search" type="search" placeholder="Search 1,800+ techniques…"><select id="jutsu-rank"><option value="">All ranks</option></select><select id="jutsu-discipline"><option value="">All disciplines</option></select></div>
+              <div id="jutsu-results" class="catalogue-results"></div>
+            </div>
+            <aside><h4>Selected jutsu</h4><div id="selected-jutsu" class="selected-stack"></div></aside>
+          </div>
+        </section>
+
+        <section class="step-panel" data-panel="arsenal">
+          <div class="section-heading"><div><span>Arsenal</span><h3>Weapons and custom actions</h3></div><p>Weapon attacks use the assigned ability modifiers and proficiency bonus.</p></div>
+          <div class="catalogue-layout">
+            <div><div class="toolbar"><input id="weapon-search" type="search" placeholder="Search weapons…"><select id="weapon-group"><option value="">All groups</option></select></div><div id="weapon-results" class="catalogue-results"></div></div>
+            <aside><h4>Selected weapons</h4><div id="selected-weapons" class="selected-stack"></div></aside>
+          </div>
+          <div class="subsection custom-action-maker"><h4>Custom action</h4><div class="form-grid three"><label>Name<input id="custom-action-name" placeholder="Crushing Palm"></label><label>Action type<select id="custom-action-type"><option>Action</option><option>Bonus Action</option><option>Reaction</option><option>Free Action</option><option>Special</option></select></label><label>Details<input id="custom-action-detail" placeholder="Attack, save, damage, and effect"></label></div><button id="add-custom-action" class="button primary">Add action</button><div id="custom-actions" class="selected-stack horizontal"></div></div>
+        </section>
+
+        <section class="step-panel" data-panel="tactics">
+          <div class="section-heading"><div><span>Combat plan</span><h3>Make the statblock easy to run</h3></div><p>A short plan is more useful at the table than a pile of disconnected options.</p></div>
+          <div class="tactics-grid">
+            <label>Opening move<textarea data-tactic="opener" rows="4" placeholder="How does the enemy start the fight?"></textarea></label>
+            <label>Default action<textarea data-tactic="action" rows="4" placeholder="What do they do on most turns?"></textarea></label>
+            <label>Bonus action plan<textarea data-tactic="bonus" rows="4" placeholder="When and why do they use it?"></textarea></label>
+            <label>Reaction trigger<textarea data-tactic="reaction" rows="4" placeholder="What should the players do to trigger it?"></textarea></label>
+            <label class="span-two">Bloodied / phase change<textarea data-tactic="bloodied" rows="4" placeholder="How do tactics change below 50% HP?"></textarea></label>
+          </div>
+          <div class="subsection"><h4>Defensive adjustments</h4><div class="form-grid three"><label>AC adjustment<input data-field="acAdjustment" type="number" step="1"></label><label>Speed adjustment<input data-field="speedAdjustment" type="number" step="5"></label><label>Damage reduction<input data-field="damageReduction" type="number" min="0"></label><label>HP multiplier<input data-field="hpMultiplier" type="number" min="0.1" step="0.1"></label><label>Chakra multiplier<input data-field="chakraMultiplier" type="number" min="0.1" step="0.1"></label><label>Senses<input data-field="senses" placeholder="Darkvision 60 ft"></label><label>Resistances<input data-field="resistances"></label><label>Immunities<input data-field="immunities"></label><label>Vulnerabilities<input data-field="vulnerabilities"></label><label class="span-three">Languages<input data-field="languages"></label></div></div>
+          <label class="wide-label">DM notes<textarea data-field="notes" rows="7" placeholder="Personality cues, encounter beats, contingencies, and loot…"></textarea></label>
+        </section>
+
+        <section class="step-panel" data-panel="statblock">
+          <div class="section-heading no-print"><div><span>Ready to run</span><h3>Generated statblock</h3></div><div class="inline-actions"><button id="print-statblock" class="button primary">Print</button></div></div>
+          <div id="validation" class="validation no-print"></div>
+          <article id="statblock" class="statblock"></article>
+        </section>
+
+        <section class="step-panel" data-panel="encounter">
+          <div class="section-heading"><div><span>Encounter lab</span><h3>PAL, TEL, and REL calculator</h3></div><p>The Kage Guide’s class weights, level-gap adjustment, and crowd multiplier are applied automatically.</p></div>
+          <div class="encounter-grid">
+            <div class="encounter-panel"><div class="panel-title"><h4>Party levels</h4><button id="add-party-member" class="button ghost small">Add member</button></div><div id="party-levels" class="party-levels"></div></div>
+            <div class="encounter-panel"><div class="panel-title"><h4>Opposition</h4><button id="add-current-encounter" class="button ghost small">Add current enemy</button></div><div id="encounter-entries" class="encounter-entries"></div></div>
+          </div>
+          <div id="encounter-summary" class="encounter-summary"></div>
+          <div class="subsection"><div class="panel-title"><div><h4>Saved adversary roster</h4><p>Save reusable builds, load them back into the forge, or add them directly to this encounter.</p></div></div><div id="roster" class="roster-grid"></div></div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="app.js?v=1"></script>
+  </body>
+</html>

@@ -1,0 +1,39 @@
+# Threat Forge
+
+A separate local-first Naruto 5e adversary builder based on the supplied official adversary workbook and the encounter guidance in the Kage Guide.
+
+## Run it
+
+From PowerShell in this folder:
+
+```powershell
+.\start.ps1
+```
+
+Then open <http://localhost:4174>.
+
+## Included
+
+- Official level arrays for Minion, Standard, Elite, and Solo adversaries
+- Rank, role, armor, party-size, HP, chakra, AC, proficiency, Tenacity, and damage calculations
+- Searchable catalogue of 913 traits, 1,820 jutsu, and 74 weapons
+- Save proficiency, skill proficiency, and mastery tracking
+- Turn coverage checks for actions, bonus actions, and reactions
+- Tactical plan and print-ready statblock
+- Reusable adversary roster with browser autosave
+- Portable JSON import and export
+- Kage Guide PAL, TEL, REL, level-gap, class-weight, class-mod, and crowd calculations
+
+## Refresh source data
+
+The workbook is read as untrusted input. Formulas and external links are not executed.
+
+```powershell
+& "C:\Users\Dire\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" tools\extract_enemy_rules.py source-adversary-builder.xlsx data\rules.json
+```
+
+## Test
+
+```powershell
+& "C:\Users\Dire\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe" --test tests\model.test.mjs
+```
