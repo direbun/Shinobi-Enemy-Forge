@@ -18,6 +18,8 @@ Then open <http://localhost:4174>.
 - Rank, role, armor, party-size, HP, chakra, AC, proficiency, Tenacity, and damage calculations
 - Searchable catalogue of 913 traits, 1,820 jutsu, and 74 weapons
 - Save proficiency, skill proficiency, and mastery tracking
+- Guided build compass with live recommendations for proficient skills, mastery points, saves, traits, jutsu, rank, attacks, and damage
+- Step-by-step explanations and previous/next controls; every recommendation remains optional
 - Turn coverage checks for actions, bonus actions, and reactions
 - Tactical plan and print-ready statblock
 - Reusable adversary roster with browser autosave

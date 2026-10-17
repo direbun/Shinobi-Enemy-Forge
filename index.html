@@ -43,9 +43,14 @@
           <div class="hero-metric"><span>Suggested damage</span><strong id="hero-damage">—</strong><small>per action</small></div>
         </section>
         <div id="notice" class="notice hidden" role="status"></div>
+        <section class="build-compass" aria-label="Guided build progress">
+          <div class="compass-copy"><span class="compass-kicker">Build compass</span><strong id="compass-title">Start with the enemy's job</strong><p id="compass-copy">Recommendations update as you build. They are guidance, never restrictions.</p></div>
+          <div id="compass-targets" class="compass-targets"></div>
+        </section>
 
         <section class="step-panel active" data-panel="forge">
           <div class="section-heading"><div><span>Core build</span><h3>Identity and encounter role</h3></div><p>Official tables drive the starting numbers. Fine-tuning stays visible and reversible.</p></div>
+          <div class="step-instructions"><strong>Do this first</strong><p>Choose what the enemy does for its team, then set level, class, and rank. Those four choices calculate nearly every recommendation in later steps.</p><span>Nothing here locks later choices—you can deliberately break the guideline at any time.</span></div>
           <div class="form-grid three">
             <label class="span-two">Adversary name<input data-field="name" autocomplete="off" placeholder="e.g. Silent Mist Hunter"></label>
             <label>Size<select data-field="size"><option>Tiny</option><option>Small</option><option selected>Medium</option><option>Large</option><option>Huge</option><option>Gargantuan</option></select></label>
@@ -62,18 +67,21 @@
           </div>
           <label class="wide-label">Concept<textarea data-field="concept" rows="3" placeholder="Appearance, personality, objective, and fighting style…"></textarea></label>
           <div id="core-stat-strip" class="stat-strip"></div>
+          <div class="subsection"><h4>Your recommended loadout</h4><p>Keep this as a quick reference while building. These are soft targets, not enforced limits.</p><div id="loadout-roadmap" class="guidance-grid roadmap"></div></div>
           <div id="role-advice" class="advice-grid"></div>
         </section>
 
         <section class="step-panel" data-panel="abilities">
           <div class="section-heading"><div><span>Ability array</span><h3>Assign strengths and weaknesses</h3></div><p>The official array changes with level and adversary class. Assign each value once, then apply deliberate adjustments.</p></div>
+          <div id="ability-guidance" class="guidance-grid"></div>
           <div id="ability-array" class="ability-array"></div>
-          <div class="subsection"><h4>Saving throw training</h4><p>Untrained saves receive half proficiency, matching the source sheet. Toggle full proficiency here.</p><div id="save-training" class="toggle-grid"></div></div>
-          <div class="subsection"><h4>Skill training</h4><div class="toolbar"><input id="skill-search" type="search" placeholder="Search skills…"></div><div id="skill-grid" class="skill-grid"></div></div>
+          <div class="subsection"><div class="subsection-title"><div><h4>Saving throw training</h4><p>Start with two full save proficiencies; untrained saves still receive half proficiency. This is a practical starting point, not a hard cap.</p></div><div id="save-budget" class="mini-budget"></div></div><div id="save-training" class="toggle-grid"></div></div>
+          <div class="subsection"><div class="subsection-title"><div><h4>Skill training</h4><p>Proficient-skill and mastery allowances update with level. Mastery adds +2 per point and can be stacked up to the displayed cap.</p></div><div id="skill-budget" class="mini-budget"></div></div><div class="toolbar"><input id="skill-search" type="search" placeholder="Search skills…"></div><div id="skill-grid" class="skill-grid"></div></div>
         </section>
 
         <section class="step-panel" data-panel="traits">
           <div class="section-heading"><div><span>Trait library</span><h3>Give the enemy a clear mechanical identity</h3></div><p>The guide recommends one or two traits for the primary job, then using remaining slots for a secondary purpose.</p></div>
+          <div class="step-instructions compact"><strong>A quick way to choose</strong><p>Pick 1–2 traits that make the primary role work. Spend any remaining suggested slots on mobility, defence, control, or sustain.</p><span>Going over the target is allowed; the counter simply flags the power increase.</span></div>
           <div id="trait-budget" class="budget-banner"></div>
           <div class="catalogue-layout">
             <div>
@@ -86,6 +94,7 @@
 
         <section class="step-panel" data-panel="jutsu">
           <div class="section-heading"><div><span>Jutsu library</span><h3>Plan every part of the turn</h3></div><p>Choose a dependable action, a bonus action worth using, and a reaction the party can trigger.</p></div>
+          <div id="jutsu-guidance" class="guidance-grid"></div>
           <div id="action-coverage" class="coverage-strip"></div>
           <div class="catalogue-layout">
             <div>
@@ -98,6 +107,7 @@
 
         <section class="step-panel" data-panel="arsenal">
           <div class="section-heading"><div><span>Arsenal</span><h3>Weapons and custom actions</h3></div><p>Weapon attacks use the assigned ability modifiers and proficiency bonus.</p></div>
+          <div id="arsenal-guidance" class="guidance-grid"></div>
           <div class="catalogue-layout">
             <div><div class="toolbar"><input id="weapon-search" type="search" placeholder="Search weapons…"><select id="weapon-group"><option value="">All groups</option></select></div><div id="weapon-results" class="catalogue-results"></div></div>
             <aside><h4>Selected weapons</h4><div id="selected-weapons" class="selected-stack"></div></aside>
@@ -107,6 +117,7 @@
 
         <section class="step-panel" data-panel="tactics">
           <div class="section-heading"><div><span>Combat plan</span><h3>Make the statblock easy to run</h3></div><p>A short plan is more useful at the table than a pile of disconnected options.</p></div>
+          <div id="tactics-guidance" class="guidance-grid"></div>
           <div class="tactics-grid">
             <label>Opening move<textarea data-tactic="opener" rows="4" placeholder="How does the enemy start the fight?"></textarea></label>
             <label>Default action<textarea data-tactic="action" rows="4" placeholder="What do they do on most turns?"></textarea></label>
@@ -133,8 +144,9 @@
           <div id="encounter-summary" class="encounter-summary"></div>
           <div class="subsection"><div class="panel-title"><div><h4>Saved adversary roster</h4><p>Save reusable builds, load them back into the forge, or add them directly to this encounter.</p></div></div><div id="roster" class="roster-grid"></div></div>
         </section>
+        <div class="step-controls no-print"><button id="previous-step" class="button ghost">← Previous</button><span id="step-position">Step 1 of 8</span><button id="next-step" class="button primary">Next step →</button></div>
       </main>
     </div>
-    <script type="module" src="app.js?v=1"></script>
+    <script type="module" src="app.js?v=2"></script>
   </body>
 </html>

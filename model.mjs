@@ -45,6 +45,7 @@ export function defaultEnemy(rules = null) {
     saveProficiencies: ["Dex", "Wis"],
     skillProficiencies: [],
     skillMasteries: [],
+    skillMasteryRanks: {},
     traits: [],
     jutsu: [],
     weapons: [],
@@ -61,6 +62,34 @@ export function defaultEnemy(rules = null) {
     languages: "",
     tactics: { opener: "", action: "", bonus: "", reaction: "", bloodied: "" },
     notes: "",
+  };
+}
+
+export function calculateGuidelines(rules, enemy) {
+  const calculated = calculateEnemy(rules, enemy);
+  const level = calculated.level;
+  const classBase = Math.max(0, Math.floor(level / 4 + 1));
+  const tierJutsu = level >= 17 ? 4 : level >= 13 ? 2 : 0;
+  const jutsuTarget = enemy.enemyClass === "Minion"
+    ? classBase
+    : classBase * 2 + tierJutsu + (["Elite", "Solo"].includes(enemy.enemyClass) ? classBase + 1 : 0);
+  const masteryBudget = Math.max(0, Math.floor(level / 4));
+  const masteryCap = 1 + (level >= 7 ? 1 : 0) + (level >= 12 ? 1 : 0);
+  const masteryRanks = enemy.skillMasteryRanks || {};
+  const masteryUsed = Object.values(masteryRanks).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
+  const abilityPointsUsed = Object.values(enemy.abilityAdjustments || {}).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
+  return {
+    proficientSkills: Math.max(0, calculated.proficiency),
+    masteryBudget,
+    masteryCap,
+    masteryUsed,
+    saveProficiencies: 2,
+    jutsuTarget,
+    maxJutsuRank: enemy.rank,
+    traitTarget: calculated.traitLimit,
+    attacksPerAction: calculated.attacks,
+    abilityPointBudget: Math.max(0, Number(calculated.rank.bonusAbilityPoints || 0)),
+    abilityPointsUsed,
   };
 }
 
@@ -131,6 +160,7 @@ export function calculateEncounter(rules, partyLevels, entries) {
 
 export function validateEnemy(rules, enemy) {
   const calculated = calculateEnemy(rules, enemy);
+  const guidance = calculateGuidelines(rules, enemy);
   const warnings = [];
   if (!enemy.name?.trim() || enemy.name === "Unnamed adversary") warnings.push("Give the adversary a name.");
   if ((enemy.traits?.length || 0) > calculated.traitLimit) warnings.push(`Selected traits exceed the suggested limit by ${enemy.traits.length - calculated.traitLimit}.`);
@@ -143,5 +173,7 @@ export function validateEnemy(rules, enemy) {
   if (!hasAction) warnings.push("Add a reliable action, weapon, or offensive jutsu.");
   if (!hasBonus) warnings.push("The Kage Guide recommends a usable bonus action.");
   if (!hasReaction) warnings.push("The Kage Guide recommends a reaction the party can trigger.");
+  if ((enemy.skillProficiencies?.length || 0) < guidance.proficientSkills) warnings.push(`The sheet suggests ${guidance.proficientSkills} proficient skills; ${enemy.skillProficiencies?.length || 0} selected.`);
+  if ((enemy.jutsu?.length || 0) < guidance.jutsuTarget) warnings.push(`The sheet suggests about ${guidance.jutsuTarget} jutsu for this level and class; ${enemy.jutsu?.length || 0} selected.`);
   return warnings;
 }

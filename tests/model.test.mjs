@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { calculateEncounter, calculateEnemy } from "../model.mjs";
+import { calculateEncounter, calculateEnemy, calculateGuidelines } from "../model.mjs";
 
 const rules = JSON.parse(fs.readFileSync(new URL("../data/rules.json", import.meta.url), "utf8"));
 
@@ -36,6 +36,21 @@ test("minions use the source sheet's compact hit-point rule", () => {
   const result = calculateEnemy(rules, { ...baseEnemy, level: 5, enemyClass: "Minion" });
   assert.equal(result.hp, 15);
   assert.equal(result.tenacity, 0);
+});
+
+test("guided allowances reproduce the sheet at level 12", () => {
+  const result = calculateGuidelines(rules, { ...baseEnemy, skillMasteryRanks: { Acrobatics: 2, Insight: 1 } });
+  assert.equal(result.proficientSkills, 6);
+  assert.equal(result.masteryBudget, 3);
+  assert.equal(result.masteryCap, 3);
+  assert.equal(result.masteryUsed, 3);
+  assert.equal(result.jutsuTarget, 8);
+  assert.equal(result.attacksPerAction, 3);
+});
+
+test("jutsu allowance changes with adversary class and tier", () => {
+  assert.equal(calculateGuidelines(rules, { ...baseEnemy, level: 5, enemyClass: "Minion" }).jutsuTarget, 2);
+  assert.equal(calculateGuidelines(rules, { ...baseEnemy, level: 13, enemyClass: "Elite" }).jutsuTarget, 15);
 });
 
 test("TEL and REL reproduce the guide's four level-5 standards example", () => {

@@ -1,4 +1,4 @@
-import { ABILITIES, RANK_ORDER, calculateEncounter, calculateEnemy, defaultEnemy, signed, validateEnemy } from "./model.mjs";
+import { ABILITIES, RANK_ORDER, calculateEncounter, calculateEnemy, calculateGuidelines, defaultEnemy, signed, validateEnemy } from "./model.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -15,6 +15,7 @@ const pageCopy = {
   statblock: ["Run the enemy", "Review warnings and use the print-ready statblock at the table."],
   encounter: ["Balance the opposition", "Compare Relative Encounter Level against the party’s PAL."],
 };
+const stepOrder = Object.keys(pageCopy);
 const roleAdvice = {
   "Generalist": "Flexible and dependable. Fill gaps in an enemy team without over-specializing.",
   "Caster (Ninjutsu)": "Ranged chakra specialist. Protect it from pressure and give it a dependable bonus action.",
@@ -38,8 +39,10 @@ function hydrateEnemy(raw = {}) {
   const enemy = { ...fresh, ...raw };
   enemy.tactics = { ...fresh.tactics, ...(raw.tactics || {}) };
   enemy.abilityAdjustments = { ...fresh.abilityAdjustments, ...(raw.abilityAdjustments || {}) };
+  enemy.skillMasteryRanks = { ...fresh.skillMasteryRanks, ...(raw.skillMasteryRanks || {}) };
   enemy.abilityOrder = safeArray(raw.abilityOrder).length === 6 ? [...raw.abilityOrder] : fresh.abilityOrder;
   for (const key of ["saveProficiencies", "skillProficiencies", "skillMasteries", "traits", "jutsu", "weapons", "customActions"]) enemy[key] = safeArray(raw[key]);
+  for (const skill of enemy.skillMasteries) if (!enemy.skillMasteryRanks[skill]) enemy.skillMasteryRanks[skill] = 1;
   return enemy;
 }
 
@@ -96,6 +99,7 @@ function setStep(step) {
   $$(".step-panel").forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === state.step));
   $("#page-title").textContent = pageCopy[state.step][0];
   $("#page-subtitle").textContent = pageCopy[state.step][1];
+  renderGuide();
   if (state.step === "statblock") renderStatblock();
   if (state.step === "encounter") renderEncounter();
   persist();
@@ -105,6 +109,7 @@ function setStep(step) {
 function commit(message) {
   persist(message);
   renderSummary();
+  renderGuide();
   renderCore();
   renderAbilities();
   renderTraits();
@@ -122,6 +127,129 @@ function renderSummary() {
   $("#sidebar-level").textContent = calc.level;
   $("#enemy-avatar").textContent = (state.enemy.name || "?").trim().slice(0, 1).toUpperCase() || "?";
   $("#hero-damage").textContent = calc.damagePerAction;
+}
+
+function guideCard(label, value, note, stateClass = "") {
+  return `<article class="guide-card ${stateClass}"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(note)}</small></article>`;
+}
+
+function recommendedWeaponText(role) {
+  if (/Lurker/.test(role)) return "Light or Critical";
+  if (/Defender/.test(role)) return "Blocking or Trip";
+  if (/Striker/.test(role)) return "Heavy or Versatile";
+  if (/Caster|Controller|Supporter/.test(role)) return "Ranged";
+  return "Any weapon that fits";
+}
+
+function buildCompletion(guidance) {
+  const coverage = actionCoverage();
+  return {
+    forge: Boolean(state.enemy.name?.trim() && state.enemy.name !== "Unnamed adversary"),
+    abilities: state.enemy.saveProficiencies.length >= guidance.saveProficiencies && state.enemy.skillProficiencies.length >= guidance.proficientSkills,
+    traits: state.enemy.traits.length >= Math.min(1, guidance.traitTarget),
+    jutsu: Boolean(coverage.action && state.enemy.jutsu.length >= guidance.jutsuTarget),
+    arsenal: Boolean(coverage.action),
+    tactics: Boolean(state.enemy.tactics.action && state.enemy.tactics.reaction),
+    statblock: validateEnemy(rules, state.enemy).length === 0,
+    encounter: state.encounter.entries.length > 0,
+  };
+}
+
+function renderGuide() {
+  if (!state || !rules) return;
+  const calc = calculateEnemy(rules, state.enemy);
+  const guidance = calculateGuidelines(rules, state.enemy);
+  const coverage = actionCoverage();
+  const completion = buildCompletion(guidance);
+  $$(".nav-step").forEach((button) => {
+    button.classList.toggle("done", Boolean(completion[button.dataset.step]));
+    button.setAttribute("aria-label", `${button.textContent.trim()}${completion[button.dataset.step] ? ", recommendation met" : ""}`);
+  });
+  const index = stepOrder.indexOf(state.step);
+  $("#step-position").textContent = `Step ${index + 1} of ${stepOrder.length} · ${Object.values(completion).filter(Boolean).length} recommendations met`;
+  $("#previous-step").disabled = index <= 0;
+  $("#next-step").disabled = index >= stepOrder.length - 1;
+  $("#next-step").textContent = index === stepOrder.length - 1 ? "Finished" : "Next step →";
+
+  const guides = {
+    forge: ["Choose the enemy's job", "Set role, class, rank, and level first. Everything below recalculates immediately.", [
+      ["Role", state.enemy.role, "What it contributes to the team"],
+      ["Class", state.enemy.enemyClass, "Durability and encounter weight"],
+      ["Rank", state.enemy.rank, "Dice and rank modifiers"],
+    ]],
+    abilities: ["Spend training where it matters", "Use the array for identity, then spend the suggested training budget. Going over is allowed and visibly flagged.", [
+      ["Full saves", `${state.enemy.saveProficiencies.length} / ${guidance.saveProficiencies}`, "Practical starting suggestion"],
+      ["Proficient skills", `${state.enemy.skillProficiencies.length} / ${guidance.proficientSkills}`, "Sheet target = proficiency bonus"],
+      ["Mastery points", `${guidance.masteryUsed} / ${guidance.masteryBudget}`, `Maximum ${guidance.masteryCap} on one skill`],
+    ]],
+    traits: ["Build the role before adding tricks", "Pick one or two defining traits first. Remaining suggested slots can solve a secondary need.", [
+      ["Trait slots", `${state.enemy.traits.length} / ${guidance.traitTarget}`, "Official level/class target"],
+      ["Primary-role traits", "1–2", "Guide recommendation"],
+      ["Freedom", "Overrides allowed", "Counters warn but never block"],
+    ]],
+    jutsu: ["Give every turn a simple plan", "Meet the suggested total, but prioritize a dependable action, useful bonus action, and player-triggered reaction.", [
+      ["Jutsu known", `${state.enemy.jutsu.length} / ${guidance.jutsuTarget}`, "Sheet level/class target"],
+      ["Suggested ceiling", guidance.maxJutsuRank, "Higher ranks remain selectable"],
+      ["Turn coverage", `${Object.values(coverage).filter(Boolean).length} / 3`, "Action · bonus · reaction"],
+    ]],
+    arsenal: ["Choose one dependable fallback", "A weapon or custom action keeps the enemy runnable when jutsu are unavailable.", [
+      ["Role suggests", recommendedWeaponText(state.enemy.role), "Soft weapon guidance"],
+      ["Attacks", `${calc.attacks} / action`, "Expected at this level"],
+      ["Damage target", `${calc.damagePerAction}`, "Suggested total per action"],
+    ]],
+    tactics: ["Write decisions, not lore", "One sentence in each box is enough. The default action and reaction trigger do the most work at the table.", [
+      ["Opening move", state.enemy.tactics.opener ? "Written" : "Not written", "How the fight begins"],
+      ["Default turn", state.enemy.tactics.action ? "Written" : "Not written", "What happens most rounds"],
+      ["Reaction trigger", state.enemy.tactics.reaction ? "Written" : "Not written", "What players can trigger"],
+    ]],
+    statblock: ["Resolve only the warnings that matter", "Warnings compare the build with source guidance; none of them prevent printing or play.", [
+      ["Warnings", validateEnemy(rules, state.enemy).length, "Advisory checks remaining"],
+      ["Damage / action", calc.damagePerAction, "Use when writing custom attacks"],
+      ["Attacks / action", calc.attacks, "Expected multiattack count"],
+    ]],
+    encounter: ["Check the whole fight", "Add enemies, enter each character level, and compare REL with PAL. Aim near Moderate unless you want a deliberate spike.", [
+      ["Party members", state.encounter.partyLevels.length, "Used to calculate PAL"],
+      ["Enemy entries", state.encounter.entries.length, "Used to calculate TEL"],
+      ["Current weight", state.enemy.enemyClass, "Minion ½ · Standard 1 · Elite 2 · Solo 4"],
+    ]],
+  };
+  const [title, copy, targets] = guides[state.step];
+  $("#compass-title").textContent = title;
+  $("#compass-copy").textContent = copy;
+  $("#compass-targets").innerHTML = targets.map(([label, value, note]) => guideCard(label, value, note)).join("");
+  $("#loadout-roadmap").innerHTML = [
+    guideCard("Full saves", guidance.saveProficiencies, "Practical starting point"),
+    guideCard("Proficient skills", guidance.proficientSkills, "Equals proficiency bonus"),
+    guideCard("Mastery points", guidance.masteryBudget, `Up to ${guidance.masteryCap} per skill`),
+    guideCard("Traits", guidance.traitTarget, "Level/class target"),
+    guideCard("Jutsu", guidance.jutsuTarget, `${guidance.maxJutsuRank} or lower suggested`),
+    guideCard("Attacks", calc.attacks, `${calc.damagePerAction} total damage/action`),
+  ].join("");
+
+  const abilityBudgetState = guidance.abilityPointsUsed > guidance.abilityPointBudget ? "over" : "";
+  $("#ability-guidance").innerHTML = [
+    guideCard("Rank adjustment points", `${guidance.abilityPointsUsed} / ${guidance.abilityPointBudget}`, "Positive manual adjustments used", abilityBudgetState),
+    guideCard("Full save proficiencies", `${state.enemy.saveProficiencies.length} / ${guidance.saveProficiencies}`, "Start with two; choose the saves central to the concept"),
+    guideCard("Skill training", `${state.enemy.skillProficiencies.length} / ${guidance.proficientSkills}`, "Recommended proficient skills"),
+    guideCard("Mastery", `${guidance.masteryUsed} / ${guidance.masteryBudget}`, `Spend up to ${guidance.masteryCap} on one skill`, guidance.masteryUsed > guidance.masteryBudget ? "over" : ""),
+  ].join("");
+  $("#save-budget").innerHTML = `<strong>${state.enemy.saveProficiencies.length} / ${guidance.saveProficiencies}</strong><span>suggested</span>`;
+  $("#skill-budget").innerHTML = `<strong>${state.enemy.skillProficiencies.length} / ${guidance.proficientSkills}</strong><span>proficient</span><strong>${guidance.masteryUsed} / ${guidance.masteryBudget}</strong><span>mastery points</span>`;
+  $("#jutsu-guidance").innerHTML = [
+    guideCard("Jutsu known", `${state.enemy.jutsu.length} / ${guidance.jutsuTarget}`, "Recommended total; more are still allowed", state.enemy.jutsu.length > guidance.jutsuTarget ? "over" : ""),
+    guideCard("Rank guidance", `${guidance.maxJutsuRank} or lower`, "Higher-ranked techniques remain available"),
+    guideCard("Action economy", `${Object.values(coverage).filter(Boolean).length} / 3`, "Cover action, bonus action, and reaction"),
+  ].join("");
+  $("#arsenal-guidance").innerHTML = [
+    guideCard("Weapon style", recommendedWeaponText(state.enemy.role), `Suggested for ${state.enemy.role}`),
+    guideCard("Expected multiattack", calc.attacks, "Attacks made when using the standard attack action"),
+    guideCard("Damage budget", calc.damagePerAction, "Total suggested damage across the action"),
+  ].join("");
+  $("#tactics-guidance").innerHTML = [
+    guideCard("Opener", state.enemy.tactics.opener ? "Ready" : "Write one", "Positioning or setup"),
+    guideCard("Default action", state.enemy.tactics.action ? "Ready" : "Write one", "Reliable turn plan"),
+    guideCard("Reaction", state.enemy.tactics.reaction ? "Ready" : "Write one", "A trigger players can cause"),
+  ].join("");
 }
 
 function renderCore() {
@@ -145,6 +273,7 @@ function renderCore() {
 
 function renderAbilities() {
   const calc = calculateEnemy(rules, state.enemy);
+  const guidance = calculateGuidelines(rules, state.enemy);
   const array = state.enemy.enemyClass === "Elite" || state.enemy.enemyClass === "Solo" ? calc.levelStats.eliteArray : calc.levelStats.standardArray;
   $("#ability-array").innerHTML = array.map((base, index) => {
     const ability = state.enemy.abilityOrder[index];
@@ -154,8 +283,8 @@ function renderAbilities() {
   const search = ($("#skill-search")?.value || "").toLowerCase();
   $("#skill-grid").innerHTML = rules.skills.filter((skill) => skill.name.toLowerCase().includes(search)).map((skill) => {
     const proficient = state.enemy.skillProficiencies.includes(skill.name);
-    const mastered = state.enemy.skillMasteries.includes(skill.name);
-    return `<div class="skill-toggle"><div><strong>${esc(skill.name)}</strong><small>${esc(skill.ability)}</small></div><label>Prof <input data-skill-prof="${esc(skill.name)}" type="checkbox"${proficient ? " checked" : ""}></label><label>Master <input data-skill-master="${esc(skill.name)}" type="checkbox"${mastered ? " checked" : ""}></label></div>`;
+    const mastery = Math.max(0, Number(state.enemy.skillMasteryRanks[skill.name] || 0));
+    return `<div class="skill-toggle"><div><strong>${esc(skill.name)}</strong><small>${esc(skill.ability)} · ${proficient ? `+${calc.proficiency} proficiency` : "untrained"}${mastery ? ` · +${mastery * 2} mastery` : ""}</small></div><label>Prof <input data-skill-prof="${esc(skill.name)}" type="checkbox"${proficient ? " checked" : ""}></label><label>Mastery <select data-skill-mastery="${esc(skill.name)}">${Array.from({ length: guidance.masteryCap + 1 }, (_, rank) => `<option value="${rank}"${rank === mastery ? " selected" : ""}>${rank}</option>`).join("")}</select></label></div>`;
   }).join("");
 }
 
@@ -206,12 +335,14 @@ function actionCoverage() {
 }
 
 function renderJutsu() {
+  const guidance = calculateGuidelines(rules, state.enemy);
   const coverage = actionCoverage();
   $("#action-coverage").innerHTML = Object.entries(coverage).map(([name, covered]) => `<div><span>${name[0].toUpperCase() + name.slice(1)}</span><b class="${covered ? "good" : "missing"}">${covered ? "Covered" : "Missing"}</b></div>`).join("");
   const filtered = filteredJutsu();
   $("#jutsu-results").innerHTML = `<div class="result-count">${filtered.length.toLocaleString()} matches · showing ${Math.min(80, filtered.length)}</div>` + filtered.slice(0, 80).map((jutsu) => {
     const selected = state.enemy.jutsu.includes(jutsu.id);
-    return `<article class="catalogue-card${selected ? " selected" : ""}"><div><h5>${esc(jutsu.name)}</h5><div class="meta">${esc(jutsu.rank)} · ${esc(jutsu.discipline)} · ${esc(jutsu.castingTime)} · ${esc(jutsu.cost)}</div><p>${esc(jutsu.description)}</p></div><button data-toggle-jutsu="${jutsu.id}">${selected ? "Remove" : "Add"}</button></article>`;
+    const aboveRank = RANK_ORDER.indexOf(jutsu.rank) > RANK_ORDER.indexOf(guidance.maxJutsuRank);
+    return `<article class="catalogue-card${selected ? " selected" : ""}${aboveRank ? " above-guideline" : ""}"><div><h5>${esc(jutsu.name)}${aboveRank ? `<span class="advisory-tag">Above suggested rank</span>` : ""}</h5><div class="meta">${esc(jutsu.rank)} · ${esc(jutsu.discipline)} · ${esc(jutsu.castingTime)} · ${esc(jutsu.cost)}</div><p>${esc(jutsu.description)}</p></div><button data-toggle-jutsu="${jutsu.id}">${selected ? "Remove" : "Add"}</button></article>`;
   }).join("");
   renderSelected("#selected-jutsu", state.enemy.jutsu, rules.jutsu, "jutsu", (item) => `${item.rank} · ${item.castingTime}`);
 }
@@ -249,10 +380,11 @@ function renderStatblock() {
   const traits = state.enemy.traits.map((id) => rules.traits.find((item) => item.id === id)).filter(Boolean);
   const jutsu = state.enemy.jutsu.map((id) => rules.jutsu.find((item) => item.id === id)).filter(Boolean);
   const weapons = state.enemy.weapons.map((id) => rules.weapons.find((item) => item.id === id)).filter(Boolean);
-  const trainedSkills = rules.skills.filter((skill) => state.enemy.skillProficiencies.includes(skill.name) || state.enemy.skillMasteries.includes(skill.name)).map((skill) => {
+  const trainedSkills = rules.skills.filter((skill) => state.enemy.skillProficiencies.includes(skill.name) || Number(state.enemy.skillMasteryRanks[skill.name] || 0) > 0).map((skill) => {
     const ability = skill.ability?.slice(0, 3) || "Int";
-    const multiplier = state.enemy.skillMasteries.includes(skill.name) ? 2 : 1;
-    return `${skill.name} ${signed(calc.abilities[ability] + calc.proficiency * multiplier)}`;
+    const proficiency = state.enemy.skillProficiencies.includes(skill.name) ? calc.proficiency : 0;
+    const mastery = Number(state.enemy.skillMasteryRanks[skill.name] || 0) * 2;
+    return `${skill.name} ${signed(calc.abilities[ability] + proficiency + mastery)}`;
   });
   const saveText = ABILITIES.map((ability) => `${ability} ${signed(calc.saves[ability])}`).join(", ");
   const defenseLines = [state.enemy.resistances && `<div class="stat-line"><strong>Damage Resistances</strong> ${esc(state.enemy.resistances)}</div>`, state.enemy.immunities && `<div class="stat-line"><strong>Immunities</strong> ${esc(state.enemy.immunities)}</div>`, state.enemy.vulnerabilities && `<div class="stat-line"><strong>Vulnerabilities</strong> ${esc(state.enemy.vulnerabilities)}</div>`].filter(Boolean).join("");
@@ -313,11 +445,12 @@ function bindEvents() {
     const field = event.target.dataset.field;
     if (field) {
       state.enemy[field] = numberFields.has(field) ? Number(event.target.value) : event.target.value;
-      persist(); renderSummary(); renderCore(); renderAbilities(); renderStatblock();
+      persist(); renderSummary(); renderCore(); renderAbilities(); renderGuide(); renderStatblock();
+      if (["level", "enemyClass", "rank", "role"].includes(field)) { renderTraits(); renderJutsu(); renderWeapons(); }
       return;
     }
     const tactic = event.target.dataset.tactic;
-    if (tactic) { state.enemy.tactics[tactic] = event.target.value; persist(); renderStatblock(); return; }
+    if (tactic) { state.enemy.tactics[tactic] = event.target.value; persist(); renderGuide(); renderStatblock(); return; }
     if (event.target.matches("#trait-search, #trait-rank, #trait-category")) renderTraits();
     if (event.target.matches("#jutsu-search, #jutsu-rank, #jutsu-discipline")) renderJutsu();
     if (event.target.matches("#weapon-search, #weapon-group")) renderWeapons();
@@ -330,8 +463,8 @@ function bindEvents() {
     }
     if (event.target.dataset.adjust) { state.enemy.abilityAdjustments[event.target.dataset.adjust] = Number(event.target.value); commit("Ability adjustment saved"); return; }
     if (event.target.dataset.saveProf) { const ability = event.target.dataset.saveProf; state.enemy.saveProficiencies = event.target.checked ? [...new Set([...state.enemy.saveProficiencies, ability])] : state.enemy.saveProficiencies.filter((item) => item !== ability); commit(); return; }
-    if (event.target.dataset.skillProf) { toggleArray(state.enemy.skillProficiencies, event.target.dataset.skillProf, event.target.checked); if (!event.target.checked) state.enemy.skillMasteries = state.enemy.skillMasteries.filter((item) => item !== event.target.dataset.skillProf); commit(); return; }
-    if (event.target.dataset.skillMaster) { const skill = event.target.dataset.skillMaster; toggleArray(state.enemy.skillMasteries, skill, event.target.checked); if (event.target.checked && !state.enemy.skillProficiencies.includes(skill)) state.enemy.skillProficiencies.push(skill); commit(); return; }
+    if (event.target.dataset.skillProf) { const skill = event.target.dataset.skillProf; toggleArray(state.enemy.skillProficiencies, skill, event.target.checked); if (!event.target.checked) { delete state.enemy.skillMasteryRanks[skill]; state.enemy.skillMasteries = state.enemy.skillMasteries.filter((item) => item !== skill); } commit(); return; }
+    if (event.target.dataset.skillMastery) { const skill = event.target.dataset.skillMastery; const rank = Number(event.target.value); if (rank > 0) { state.enemy.skillMasteryRanks[skill] = rank; if (!state.enemy.skillProficiencies.includes(skill)) state.enemy.skillProficiencies.push(skill); if (!state.enemy.skillMasteries.includes(skill)) state.enemy.skillMasteries.push(skill); } else { delete state.enemy.skillMasteryRanks[skill]; state.enemy.skillMasteries = state.enemy.skillMasteries.filter((item) => item !== skill); } commit(); return; }
     if (event.target.dataset.partyIndex !== undefined) { state.encounter.partyLevels[Number(event.target.dataset.partyIndex)] = Number(event.target.value); persist(); renderEncounter(); }
     if (event.target.dataset.entryCount !== undefined) { state.encounter.entries[Number(event.target.dataset.entryCount)].count = Number(event.target.value); persist(); renderEncounter(); }
   });
@@ -355,6 +488,8 @@ function bindEvents() {
   $("#print-statblock").addEventListener("click", () => window.print());
   $("#add-party-member").addEventListener("click", () => { state.encounter.partyLevels.push(state.encounter.partyLevels.at(-1) || 1); persist(); renderEncounter(); });
   $("#add-current-encounter").addEventListener("click", () => addEnemyToEncounter(state.enemy));
+  $("#previous-step").addEventListener("click", () => { const index = stepOrder.indexOf(state.step); if (index > 0) setStep(stepOrder[index - 1]); });
+  $("#next-step").addEventListener("click", () => { const index = stepOrder.indexOf(state.step); if (index < stepOrder.length - 1) setStep(stepOrder[index + 1]); });
 }
 
 function toggleArray(array, value, enabled) {
