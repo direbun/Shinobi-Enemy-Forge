@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { calculateEncounter, calculateEnemy, calculateGuidelines } from "../model.mjs";
+import { auditEnemy, calculateEncounter, calculateEnemy, calculateGuidelines, exportEnemyDocument, importEnemyDocument } from "../model.mjs";
 
 const rules = JSON.parse(fs.readFileSync(new URL("../data/rules.json", import.meta.url), "utf8"));
 
@@ -51,6 +51,29 @@ test("guided allowances reproduce the sheet at level 12", () => {
 test("jutsu allowance changes with adversary class and tier", () => {
   assert.equal(calculateGuidelines(rules, { ...baseEnemy, level: 5, enemyClass: "Minion" }).jutsuTarget, 2);
   assert.equal(calculateGuidelines(rules, { ...baseEnemy, level: 13, enemyClass: "Elite" }).jutsuTarget, 15);
+});
+
+test("portable exports recover catalogue selections by readable name", () => {
+  const enemy = { ...baseEnemy, name: "Reference Test", traits: [rules.traits[0].id], jutsu: [rules.jutsu[0].id], weapons: [rules.weapons[0].id] };
+  const document = exportEnemyDocument(rules, enemy);
+  document.enemy.traits = ["obsolete-trait-id"];
+  document.enemy.jutsu = ["obsolete-jutsu-id"];
+  document.enemy.weapons = ["obsolete-weapon-id"];
+  document.catalogueSelections.traits[0].id = "obsolete-trait-id";
+  document.catalogueSelections.jutsu[0].id = "obsolete-jutsu-id";
+  document.catalogueSelections.weapons[0].id = "obsolete-weapon-id";
+  const imported = importEnemyDocument(rules, document).enemy;
+  assert.deepEqual(imported.traits, [rules.traits[0].id]);
+  assert.deepEqual(imported.jutsu, [rules.jutsu[0].id]);
+  assert.deepEqual(imported.weapons, [rules.weapons[0].id]);
+});
+
+test("validation separates required fixes, advisories, and freeform notes", () => {
+  const audit = auditEnemy(rules, { ...baseEnemy, name: "Unnamed adversary", guidanceMode: "freeform", overrideReason: "Intentional boss spike", traits: [], jutsu: [], weapons: [], customActions: [], skillProficiencies: [], skillMasteryRanks: {} });
+  assert.ok(audit.errors.some((message) => message.includes("name")));
+  assert.ok(audit.advisories.some((message) => message.includes("jutsu")));
+  assert.ok(audit.notes.some((message) => message.includes("Freeform")));
+  assert.ok(audit.notes.some((message) => message.includes("Intentional boss spike")));
 });
 
 test("TEL and REL reproduce the guide's four level-5 standards example", () => {

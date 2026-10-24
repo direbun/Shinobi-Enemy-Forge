@@ -1,5 +1,7 @@
 export const ABILITIES = ["Str", "Dex", "Con", "Int", "Wis", "Cha"];
 export const RANK_ORDER = ["E-Rank", "D-Rank", "C-Rank", "B-Rank", "A-Rank", "S-Rank"];
+export const EXPORT_FORMAT = "threat-forge";
+export const EXPORT_VERSION = 2;
 
 export function clamp(value, min, max) {
   const number = Number(value);
@@ -62,7 +64,56 @@ export function defaultEnemy(rules = null) {
     languages: "",
     tactics: { opener: "", action: "", bonus: "", reaction: "", bloodied: "" },
     notes: "",
+    guidanceMode: "guided",
+    overrideReason: "",
   };
+}
+
+function normalizedName(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+export function catalogueReferences(ids, catalogue) {
+  return (ids || []).map((id) => catalogue.find((item) => item.id === id)).filter(Boolean).map((item) => ({ id: item.id, name: item.name }));
+}
+
+export function resolveCatalogueReferences(references, legacyIds, catalogue) {
+  const byId = new Map(catalogue.map((item) => [item.id, item]));
+  const byName = new Map(catalogue.map((item) => [normalizedName(item.name), item]));
+  const requested = Array.isArray(references) && references.length ? references : (legacyIds || []).map((id) => ({ id }));
+  const resolved = [];
+  for (const reference of requested) {
+    const id = typeof reference === "string" ? reference : reference?.id;
+    const name = typeof reference === "string" ? "" : reference?.name;
+    const item = byId.get(id) || byName.get(normalizedName(name));
+    if (item && !resolved.includes(item.id)) resolved.push(item.id);
+  }
+  return resolved;
+}
+
+export function exportEnemyDocument(rules, enemy) {
+  return {
+    format: EXPORT_FORMAT,
+    version: EXPORT_VERSION,
+    exportedAt: new Date().toISOString(),
+    source: { ...rules.source },
+    enemy: { ...enemy },
+    catalogueSelections: {
+      traits: catalogueReferences(enemy.traits, rules.traits),
+      jutsu: catalogueReferences(enemy.jutsu, rules.jutsu),
+      weapons: catalogueReferences(enemy.weapons, rules.weapons),
+    },
+  };
+}
+
+export function importEnemyDocument(rules, input) {
+  const document = input?.format === EXPORT_FORMAT ? input : { version: 0, enemy: input };
+  const enemy = { ...(document.enemy || {}) };
+  const refs = document.catalogueSelections || {};
+  enemy.traits = resolveCatalogueReferences(refs.traits, enemy.traits, rules.traits);
+  enemy.jutsu = resolveCatalogueReferences(refs.jutsu, enemy.jutsu, rules.jutsu);
+  enemy.weapons = resolveCatalogueReferences(refs.weapons, enemy.weapons, rules.weapons);
+  return { enemy, migratedFrom: Number(document.version || 0), source: document.source || null };
 }
 
 export function calculateGuidelines(rules, enemy) {
@@ -158,22 +209,36 @@ export function calculateEncounter(rules, partyLevels, entries) {
   return { partySize, pal, enemyCount, tel, crowdMultiplier, rel, delta, difficulty };
 }
 
-export function validateEnemy(rules, enemy) {
+export function auditEnemy(rules, enemy) {
   const calculated = calculateEnemy(rules, enemy);
   const guidance = calculateGuidelines(rules, enemy);
-  const warnings = [];
-  if (!enemy.name?.trim() || enemy.name === "Unnamed adversary") warnings.push("Give the adversary a name.");
-  if ((enemy.traits?.length || 0) > calculated.traitLimit) warnings.push(`Selected traits exceed the suggested limit by ${enemy.traits.length - calculated.traitLimit}.`);
+  const errors = [];
+  const advisories = [];
+  const notes = [];
+  if (!enemy.name?.trim() || enemy.name === "Unnamed adversary") errors.push("Give the adversary a name before saving or printing it.");
+  if (new Set(enemy.abilityOrder || []).size !== ABILITIES.length) errors.push("Assign every ability exactly once in the ability array.");
+  if ((enemy.traits?.length || 0) > calculated.traitLimit) advisories.push(`Selected traits exceed the suggested limit by ${enemy.traits.length - calculated.traitLimit}.`);
   const hasAction = (enemy.jutsu || []).some((id) => {
     const item = rules.jutsu.find((jutsu) => jutsu.id === id);
     return item && /action/i.test(item.castingTime) && !/bonus|reaction/i.test(item.castingTime);
   }) || (enemy.weapons?.length || 0) > 0 || (enemy.customActions?.length || 0) > 0;
   const hasBonus = (enemy.jutsu || []).some((id) => /bonus action/i.test(rules.jutsu.find((jutsu) => jutsu.id === id)?.castingTime || ""));
   const hasReaction = (enemy.jutsu || []).some((id) => /reaction/i.test(rules.jutsu.find((jutsu) => jutsu.id === id)?.castingTime || ""));
-  if (!hasAction) warnings.push("Add a reliable action, weapon, or offensive jutsu.");
-  if (!hasBonus) warnings.push("The Kage Guide recommends a usable bonus action.");
-  if (!hasReaction) warnings.push("The Kage Guide recommends a reaction the party can trigger.");
-  if ((enemy.skillProficiencies?.length || 0) < guidance.proficientSkills) warnings.push(`The sheet suggests ${guidance.proficientSkills} proficient skills; ${enemy.skillProficiencies?.length || 0} selected.`);
-  if ((enemy.jutsu?.length || 0) < guidance.jutsuTarget) warnings.push(`The sheet suggests about ${guidance.jutsuTarget} jutsu for this level and class; ${enemy.jutsu?.length || 0} selected.`);
-  return warnings;
+  if (!hasAction) advisories.push("Add a reliable action, weapon, or offensive jutsu.");
+  if (!hasBonus) advisories.push("The Kage Guide recommends a usable bonus action.");
+  if (!hasReaction) advisories.push("The Kage Guide recommends a reaction the party can trigger.");
+  if ((enemy.skillProficiencies?.length || 0) < guidance.proficientSkills) advisories.push(`The sheet suggests ${guidance.proficientSkills} proficient skills; ${enemy.skillProficiencies?.length || 0} selected.`);
+  if ((enemy.jutsu?.length || 0) < guidance.jutsuTarget) advisories.push(`The sheet suggests about ${guidance.jutsuTarget} jutsu for this level and class; ${enemy.jutsu?.length || 0} selected.`);
+  if (guidance.masteryUsed > guidance.masteryBudget) advisories.push(`Mastery use exceeds the suggested budget by ${guidance.masteryUsed - guidance.masteryBudget}.`);
+  if (guidance.abilityPointsUsed > guidance.abilityPointBudget) advisories.push(`Positive ability adjustments exceed the rank budget by ${guidance.abilityPointsUsed - guidance.abilityPointBudget}.`);
+  const aboveRank = (enemy.jutsu || []).map((id) => rules.jutsu.find((item) => item.id === id)).filter(Boolean).filter((item) => RANK_ORDER.indexOf(item.rank) > RANK_ORDER.indexOf(guidance.maxJutsuRank));
+  if (aboveRank.length) advisories.push(`${aboveRank.length} selected jutsu ${aboveRank.length === 1 ? "is" : "are"} above the suggested ${guidance.maxJutsuRank} ceiling.`);
+  if (enemy.overrideReason?.trim()) notes.push(`GM override: ${enemy.overrideReason.trim()}`);
+  if (enemy.guidanceMode === "freeform") notes.push("Freeform mode is active: recommendations are reference-only.");
+  return { errors, advisories, notes };
+}
+
+export function validateEnemy(rules, enemy) {
+  const audit = auditEnemy(rules, enemy);
+  return [...audit.errors, ...audit.advisories];
 }

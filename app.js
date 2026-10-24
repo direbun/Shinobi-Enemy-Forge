@@ -1,4 +1,4 @@
-import { ABILITIES, RANK_ORDER, calculateEncounter, calculateEnemy, calculateGuidelines, defaultEnemy, signed, validateEnemy } from "./model.mjs";
+import { ABILITIES, RANK_ORDER, auditEnemy, calculateEncounter, calculateEnemy, calculateGuidelines, defaultEnemy, exportEnemyDocument, importEnemyDocument, signed, validateEnemy } from "./model.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -68,6 +68,20 @@ function options(values, selected) {
   return values.map((value) => `<option value="${esc(value)}"${value === selected ? " selected" : ""}>${esc(value)}</option>`).join("");
 }
 
+function matchesTokens(haystack, query) {
+  const text = String(haystack || "").toLowerCase();
+  return String(query || "").toLowerCase().split(/[\s,]+/).filter(Boolean).every((token) => text.includes(token));
+}
+
+function weaponFitsRole(weapon, role) {
+  const qualities = `${weapon.qualities || ""} ${weapon.attackType || ""} ${weapon.range || ""}`.toLowerCase();
+  if (/Lurker/.test(role)) return /light|critical/.test(qualities);
+  if (/Defender/.test(role)) return /blocking|trip/.test(qualities);
+  if (/Striker/.test(role)) return /heavy|versatile/.test(qualities);
+  if (/Caster|Controller|Supporter/.test(role)) return /ranged|thrown|\d+\s*\/\s*\d+/.test(qualities);
+  return true;
+}
+
 function populateStaticOptions() {
   $("#class-select").innerHTML = options(rules.classes, state.enemy.enemyClass);
   $("#role-select").innerHTML = options(rules.roles.map((role) => role.name), state.enemy.role);
@@ -123,7 +137,8 @@ function commit(message) {
 function renderSummary() {
   const calc = calculateEnemy(rules, state.enemy);
   $("#sidebar-name").textContent = state.enemy.name || "Unnamed adversary";
-  $("#sidebar-build").textContent = `${state.enemy.enemyClass} · ${state.enemy.role}`;
+  const buildStyle = state.enemy.guidanceMode === "freeform" ? "Freeform" : "Guided";
+  $("#sidebar-build").textContent = `${state.enemy.enemyClass} · ${state.enemy.role} · ${buildStyle}`;
   $("#sidebar-level").textContent = calc.level;
   $("#enemy-avatar").textContent = (state.enemy.name || "?").trim().slice(0, 1).toUpperCase() || "?";
   $("#hero-damage").textContent = calc.damagePerAction;
@@ -143,7 +158,7 @@ function recommendedWeaponText(role) {
 
 function buildCompletion(guidance) {
   const coverage = actionCoverage();
-  return {
+  const completion = {
     forge: Boolean(state.enemy.name?.trim() && state.enemy.name !== "Unnamed adversary"),
     abilities: state.enemy.saveProficiencies.length >= guidance.saveProficiencies && state.enemy.skillProficiencies.length >= guidance.proficientSkills,
     traits: state.enemy.traits.length >= Math.min(1, guidance.traitTarget),
@@ -153,6 +168,10 @@ function buildCompletion(guidance) {
     statblock: validateEnemy(rules, state.enemy).length === 0,
     encounter: state.encounter.entries.length > 0,
   };
+  if (state.enemy.guidanceMode === "freeform") {
+    for (const step of ["abilities", "traits", "jutsu", "arsenal", "tactics"]) completion[step] = true;
+  }
+  return completion;
 }
 
 function renderGuide() {
@@ -214,8 +233,10 @@ function renderGuide() {
     ]],
   };
   const [title, copy, targets] = guides[state.step];
-  $("#compass-title").textContent = title;
-  $("#compass-copy").textContent = copy;
+  const freeform = state.enemy.guidanceMode === "freeform";
+  $(".compass-kicker").textContent = freeform ? "Freeform reference" : "Build compass";
+  $("#compass-title").textContent = freeform ? `${title} — recommendations are optional` : title;
+  $("#compass-copy").textContent = freeform ? `${copy} Freeform mode leaves every recommendation as reference-only.` : copy;
   $("#compass-targets").innerHTML = targets.map(([label, value, note]) => guideCard(label, value, note)).join("");
   $("#loadout-roadmap").innerHTML = [
     guideCard("Full saves", guidance.saveProficiencies, "Practical starting point"),
@@ -269,6 +290,10 @@ function renderCore() {
     [state.enemy.enemyClass, classText],
     [state.enemy.rank, `${calc.rank.hitDie} hit die · ${calc.rank.chakraDie} chakra die · ${signed(calc.rank.toHitBonus)} rank attack modifier.`],
   ].map(([title, text]) => `<article class="advice-card"><strong>${esc(title)}</strong><p>${esc(text)}</p></article>`).join("");
+  $("#source-provenance").innerHTML = `
+    <div class="source-row"><strong>Adversary tables</strong><span>${esc(rules.source.title)} · version ${esc(rules.source.version)}</span><small>Levels, arrays, roles, ranks, trait limits, allowances, and catalogue records.</small></div>
+    <div class="source-row"><strong>Kage Guide</strong><span>${esc(rules.source.guide)}</span><small>Encounter TEL/REL rules and action-economy design advice.</small></div>
+    <div class="source-row"><strong>Builder policy</strong><span>${state.enemy.guidanceMode === "freeform" ? "Freeform reference" : "Guided recommendations"}</span><small>Recommendations never prevent selection, saving, export, or printing.</small></div>`;
 }
 
 function renderAbilities() {
@@ -289,12 +314,15 @@ function renderAbilities() {
 }
 
 function filteredTraits() {
-  const search = $("#trait-search").value.trim().toLowerCase();
+  const search = $("#trait-search").value.trim();
   const rank = $("#trait-rank").value;
   const category = $("#trait-category").value;
+  const suggestedOnly = $("#trait-suggested").checked;
+  const selectedOnly = $("#trait-selected-only").checked;
+  const relevantSources = ["Generic", state.enemy.role, state.enemy.clan, state.enemy.affiliation];
   return rules.traits.filter((trait) => {
-    const haystack = `${trait.name} ${trait.description} ${trait.source} ${trait.categories}`.toLowerCase();
-    return (!search || haystack.includes(search)) && (!rank || trait.rank === rank) && (!category || String(trait.categories).includes(category));
+    const haystack = `${trait.name} ${trait.description} ${trait.source} ${trait.categories}`;
+    return matchesTokens(haystack, search) && (!rank || trait.rank === rank) && (!category || String(trait.categories).includes(category)) && (!suggestedOnly || relevantSources.includes(trait.source)) && (!selectedOnly || state.enemy.traits.includes(trait.id));
   }).sort((a, b) => {
     const aRelevant = ["Generic", state.enemy.role, state.enemy.clan, state.enemy.affiliation].includes(a.source) ? 0 : 1;
     const bRelevant = ["Generic", state.enemy.role, state.enemy.clan, state.enemy.affiliation].includes(b.source) ? 0 : 1;
@@ -316,13 +344,19 @@ function renderTraits() {
 }
 
 function filteredJutsu() {
-  const search = $("#jutsu-search").value.trim().toLowerCase();
+  const search = $("#jutsu-search").value.trim();
+  const keywords = $("#jutsu-keywords").value.trim();
   const rank = $("#jutsu-rank").value;
   const discipline = $("#jutsu-discipline").value;
+  const actionType = $("#jutsu-action").value;
+  const suggestedRank = $("#jutsu-suggested-rank").checked;
+  const selectedOnly = $("#jutsu-selected-only").checked;
+  const maxRank = RANK_ORDER.indexOf(state.enemy.rank);
   return rules.jutsu.filter((jutsu) => {
-    const haystack = `${jutsu.name} ${jutsu.description} ${jutsu.keywords} ${jutsu.castingTime}`.toLowerCase();
-    return (!search || haystack.includes(search)) && (!rank || jutsu.rank === rank) && (!discipline || jutsu.discipline === discipline);
-  });
+    const haystack = `${jutsu.name} ${jutsu.description} ${jutsu.keywords} ${jutsu.castingTime}`;
+    const actionMatch = !actionType || (actionType === "bonus" ? /bonus action/i.test(jutsu.castingTime) : actionType === "reaction" ? /reaction/i.test(jutsu.castingTime) : /action/i.test(jutsu.castingTime) && !/bonus|reaction/i.test(jutsu.castingTime));
+    return matchesTokens(haystack, search) && matchesTokens(jutsu.keywords, keywords) && (!rank || jutsu.rank === rank) && (!discipline || jutsu.discipline === discipline) && actionMatch && (!suggestedRank || RANK_ORDER.indexOf(jutsu.rank) <= maxRank) && (!selectedOnly || state.enemy.jutsu.includes(jutsu.id));
+  }).sort((a, b) => Number(state.enemy.jutsu.includes(b.id)) - Number(state.enemy.jutsu.includes(a.id)) || RANK_ORDER.indexOf(a.rank) - RANK_ORDER.indexOf(b.rank) || a.name.localeCompare(b.name));
 }
 
 function actionCoverage() {
@@ -348,16 +382,19 @@ function renderJutsu() {
 }
 
 function filteredWeapons() {
-  const search = $("#weapon-search").value.trim().toLowerCase();
+  const search = $("#weapon-search").value.trim();
   const group = $("#weapon-group").value;
-  return rules.weapons.filter((weapon) => `${weapon.name} ${weapon.qualities} ${weapon.group}`.toLowerCase().includes(search) && (!group || String(weapon.group).includes(group)));
+  const suggestedOnly = $("#weapon-suggested").checked;
+  const selectedOnly = $("#weapon-selected-only").checked;
+  return rules.weapons.filter((weapon) => matchesTokens(`${weapon.name} ${weapon.qualities} ${weapon.group}`, search) && (!group || String(weapon.group).includes(group)) && (!suggestedOnly || weaponFitsRole(weapon, state.enemy.role)) && (!selectedOnly || state.enemy.weapons.includes(weapon.id))).sort((a, b) => Number(state.enemy.weapons.includes(b.id)) - Number(state.enemy.weapons.includes(a.id)) || Number(weaponFitsRole(b, state.enemy.role)) - Number(weaponFitsRole(a, state.enemy.role)) || a.name.localeCompare(b.name));
 }
 
 function renderWeapons() {
   const filtered = filteredWeapons();
   $("#weapon-results").innerHTML = `<div class="result-count">${filtered.length.toLocaleString()} matches</div>` + filtered.map((weapon) => {
     const selected = state.enemy.weapons.includes(weapon.id);
-    return `<article class="catalogue-card${selected ? " selected" : ""}"><div><h5>${esc(weapon.name)}</h5><div class="meta">${esc(weapon.damage)} ${esc(weapon.damageType)} · ${esc(weapon.range)}</div><p>${esc(weapon.qualities)}</p></div><button data-toggle-weapon="${weapon.id}">${selected ? "Remove" : "Add"}</button></article>`;
+    const roleFit = weaponFitsRole(weapon, state.enemy.role);
+    return `<article class="catalogue-card${selected ? " selected" : ""}"><div><h5>${esc(weapon.name)}${roleFit ? `<span class="good-tag">Role fit</span>` : ""}</h5><div class="meta">${esc(weapon.damage)} ${esc(weapon.damageType)} · ${esc(weapon.range)}</div><p>${esc(weapon.qualities)}</p></div><button data-toggle-weapon="${weapon.id}">${selected ? "Remove" : "Add"}</button></article>`;
   }).join("");
   renderSelected("#selected-weapons", state.enemy.weapons, rules.weapons, "weapon", (item) => `${item.damage} ${item.damageType}`);
 }
@@ -401,6 +438,7 @@ function renderStatblock() {
       ${state.enemy.languages ? `<div class="stat-line"><strong>Languages</strong> ${esc(state.enemy.languages)}</div>` : ""}
       <div class="stat-line"><strong>Jutsu</strong> Ninjutsu ${signed(calc.saveDcs.Ninjutsu.attack)} / DC ${calc.saveDcs.Ninjutsu.dc}; Genjutsu ${signed(calc.saveDcs.Genjutsu.attack)} / DC ${calc.saveDcs.Genjutsu.dc}; Taijutsu ${signed(calc.saveDcs.Taijutsu.attack)} / DC ${calc.saveDcs.Taijutsu.dc}</div>
       ${state.enemy.concept ? `<div class="statblock-section"><h4>Concept</h4><p class="stat-entry">${esc(state.enemy.concept)}</p></div>` : ""}
+      ${state.enemy.overrideReason ? `<div class="statblock-section"><h4>Design override</h4><p class="stat-entry">${esc(state.enemy.overrideReason)}</p></div>` : ""}
       <div class="statblock-section"><h4>Traits</h4>${statEntries(traits, (trait) => `<p class="stat-entry"><strong>${esc(trait.name)}.</strong> ${esc(trait.description)}</p>`)}</div>
       <div class="statblock-section"><h4>Actions</h4>
         ${statEntries(weapons, (weapon) => { const ability = String(weapon.ability || "STR").slice(0, 3).replace(/^./, (c) => c.toUpperCase()).toLowerCase().replace(/^./, (c) => c.toUpperCase()); const mod = calc.abilities[ability] ?? calc.abilities.Str; return `<p class="stat-entry"><strong>${esc(weapon.name)}.</strong> ${esc(weapon.attackType)}: ${signed(calc.proficiency + mod + Number(calc.rank.toHitBonus || 0))} to hit, range ${esc(weapon.range)}, ${esc(weapon.targets)}. Hit: ${esc(weapon.damage)} ${signed(mod)} ${esc(weapon.damageType)} damage. ${esc(weapon.qualities)}</p>`; })}
@@ -412,8 +450,14 @@ function renderStatblock() {
       ${state.enemy.notes ? `<div class="statblock-section"><h4>DM notes</h4><p class="stat-entry">${esc(state.enemy.notes)}</p></div>` : ""}
       <div class="stat-tags"><span>${esc(state.enemy.clan)}</span><span>${esc(state.enemy.affiliation)}</span><span>${esc(state.enemy.classModTier)}</span><span>${calc.attacks} assumed attacks</span></div>
     </div>`;
-  const warnings = validateEnemy(rules, state.enemy);
-  $("#validation").innerHTML = warnings.length ? warnings.map((warning) => `<div class="warning">${esc(warning)}</div>`).join("") : `<div class="success">The build covers a reliable action, bonus action, reaction, and the suggested trait budget.</div>`;
+  const audit = auditEnemy(rules, state.enemy);
+  $("#validation-summary").innerHTML = `<article><strong>${audit.errors.length}</strong><span>Required fixes</span></article><article><strong>${audit.advisories.length}</strong><span>Balance advisories</span></article><article><strong>${audit.notes.length}</strong><span>Design notes</span></article><p>${state.enemy.guidanceMode === "freeform" ? "Freeform mode: advisories are shown for reference and do not affect readiness." : "Guided mode: advisories contribute to the progress indicators but never block export or printing."}</p>`;
+  const groups = [
+    ["error", "Required", audit.errors],
+    ["warning", "Advisory", audit.advisories],
+    ["note", "Recorded", audit.notes],
+  ];
+  $("#validation").innerHTML = groups.flatMap(([kind, label, messages]) => messages.map((message) => `<div class="${kind}"><strong>${label}</strong><span>${esc(message)}</span></div>`)).join("") || `<div class="success">No required fixes or balance advisories remain.</div>`;
 }
 
 function renderEncounter() {
@@ -451,12 +495,15 @@ function bindEvents() {
     }
     const tactic = event.target.dataset.tactic;
     if (tactic) { state.enemy.tactics[tactic] = event.target.value; persist(); renderGuide(); renderStatblock(); return; }
-    if (event.target.matches("#trait-search, #trait-rank, #trait-category")) renderTraits();
-    if (event.target.matches("#jutsu-search, #jutsu-rank, #jutsu-discipline")) renderJutsu();
-    if (event.target.matches("#weapon-search, #weapon-group")) renderWeapons();
+    if (event.target.matches("#trait-search, #trait-rank, #trait-category, #trait-suggested, #trait-selected-only")) renderTraits();
+    if (event.target.matches("#jutsu-search, #jutsu-keywords, #jutsu-rank, #jutsu-discipline, #jutsu-action, #jutsu-suggested-rank, #jutsu-selected-only")) renderJutsu();
+    if (event.target.matches("#weapon-search, #weapon-group, #weapon-suggested, #weapon-selected-only")) renderWeapons();
     if (event.target.matches("#skill-search")) renderAbilities();
   });
   document.addEventListener("change", (event) => {
+    if (event.target.matches("#trait-rank, #trait-category, #trait-suggested, #trait-selected-only")) { renderTraits(); return; }
+    if (event.target.matches("#jutsu-rank, #jutsu-discipline, #jutsu-action, #jutsu-suggested-rank, #jutsu-selected-only")) { renderJutsu(); return; }
+    if (event.target.matches("#weapon-group, #weapon-suggested, #weapon-selected-only")) { renderWeapons(); return; }
     if (event.target.dataset.arraySlot !== undefined) {
       const index = Number(event.target.dataset.arraySlot); const wanted = event.target.value; const other = state.enemy.abilityOrder.indexOf(wanted); const current = state.enemy.abilityOrder[index];
       state.enemy.abilityOrder[index] = wanted; if (other >= 0 && other !== index) state.enemy.abilityOrder[other] = current; commit("Ability array updated"); return;
@@ -469,6 +516,7 @@ function bindEvents() {
     if (event.target.dataset.entryCount !== undefined) { state.encounter.entries[Number(event.target.dataset.entryCount)].count = Number(event.target.value); persist(); renderEncounter(); }
   });
   document.addEventListener("click", (event) => {
+    if (event.target.dataset.clearFilters) { clearCatalogueFilters(event.target.dataset.clearFilters); return; }
     for (const kind of ["trait", "jutsu", "weapon"]) {
       const key = `toggle${kind[0].toUpperCase()}${kind.slice(1)}`;
       if (event.target.dataset[key]) { const property = { trait: "traits", jutsu: "jutsu", weapon: "weapons" }[kind]; const list = state.enemy[property]; toggleArray(list, event.target.dataset[key], !list.includes(event.target.dataset[key])); commit(`${kind} selection updated`); return; }
@@ -482,8 +530,8 @@ function bindEvents() {
   });
   $("#new-enemy").addEventListener("click", () => { state.enemy = defaultEnemy(rules); syncForm(); commit("New adversary started"); setStep("forge"); });
   $("#save-roster").addEventListener("click", () => { const index = state.roster.findIndex((enemy) => enemy.id === state.enemy.id); const snapshot = hydrateEnemy(JSON.parse(JSON.stringify(state.enemy))); if (index >= 0) state.roster[index] = snapshot; else state.roster.push(snapshot); persist("Saved to adversary roster"); renderEncounter(); showNotice(`${state.enemy.name} saved to the roster.`); });
-  $("#export-json").addEventListener("click", () => { const blob = new Blob([JSON.stringify({ format: "threat-forge", version: 1, enemy: state.enemy }, null, 2)], { type: "application/json" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${(state.enemy.name || "adversary").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase()}.json`; link.click(); URL.revokeObjectURL(link.href); });
-  $("#import-json").addEventListener("change", async (event) => { const file = event.target.files?.[0]; if (!file) return; try { const parsed = JSON.parse(await file.text()); state.enemy = hydrateEnemy(parsed.enemy || parsed); syncForm(); commit("Imported adversary JSON"); showNotice("Adversary imported successfully."); } catch { showNotice("That file is not valid Threat Forge JSON."); } event.target.value = ""; });
+  $("#export-json").addEventListener("click", () => { const document = exportEnemyDocument(rules, state.enemy); const blob = new Blob([JSON.stringify(document, null, 2)], { type: "application/json" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${(state.enemy.name || "adversary").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase()}.json`; link.click(); URL.revokeObjectURL(link.href); showNotice("Portable JSON exported with readable catalogue references."); });
+  $("#import-json").addEventListener("change", async (event) => { const file = event.target.files?.[0]; if (!file) return; try { const parsed = JSON.parse(await file.text()); if (parsed.format && parsed.format !== "threat-forge") throw new Error("Unsupported format"); const imported = importEnemyDocument(rules, parsed); state.enemy = hydrateEnemy(imported.enemy); syncForm(); commit("Imported adversary JSON"); const sourceNote = imported.source?.version && imported.source.version !== rules.source.version ? ` Source sheet ${imported.source.version} was remapped to ${rules.source.version}.` : ""; showNotice(`Adversary imported${imported.migratedFrom < 2 ? " and migrated to the current format" : ""}.${sourceNote}`); } catch { showNotice("That file is not valid Threat Forge JSON."); } event.target.value = ""; });
   $("#add-custom-action").addEventListener("click", () => { const name = $("#custom-action-name").value.trim(); if (!name) return showNotice("Give the custom action a name first."); state.enemy.customActions.push({ id: crypto.randomUUID(), name, type: $("#custom-action-type").value, detail: $("#custom-action-detail").value.trim() }); $("#custom-action-name").value = ""; $("#custom-action-detail").value = ""; commit("Custom action added"); });
   $("#print-statblock").addEventListener("click", () => window.print());
   $("#add-party-member").addEventListener("click", () => { state.encounter.partyLevels.push(state.encounter.partyLevels.at(-1) || 1); persist(); renderEncounter(); });
@@ -498,6 +546,16 @@ function toggleArray(array, value, enabled) {
   if (!enabled && index >= 0) array.splice(index, 1);
 }
 
+function clearCatalogueFilters(kind) {
+  const controls = {
+    trait: ["trait-search", "trait-rank", "trait-category", "trait-suggested", "trait-selected-only"],
+    jutsu: ["jutsu-search", "jutsu-keywords", "jutsu-rank", "jutsu-discipline", "jutsu-action", "jutsu-suggested-rank", "jutsu-selected-only"],
+    weapon: ["weapon-search", "weapon-group", "weapon-suggested", "weapon-selected-only"],
+  }[kind] || [];
+  for (const id of controls) { const element = $(`#${id}`); if (!element) continue; if (element.type === "checkbox") element.checked = false; else element.value = ""; }
+  ({ trait: renderTraits, jutsu: renderJutsu, weapon: renderWeapons }[kind] || (() => {}))();
+}
+
 async function init() {
   try {
     rules = await fetch("data/rules.json").then((response) => { if (!response.ok) throw new Error("Rules file unavailable"); return response.json(); });
@@ -505,7 +563,7 @@ async function init() {
     populateStaticOptions();
     syncForm();
     bindEvents();
-    $("#source-version").textContent = `Sheet ${rules.source.version} · ${rules.traits.length.toLocaleString()} traits · ${rules.jutsu.length.toLocaleString()} jutsu`;
+    $("#source-version").textContent = `Sheet ${rules.source.version} · JSON v2 · ${rules.traits.length.toLocaleString()} traits · ${rules.jutsu.length.toLocaleString()} jutsu`;
     commit("Ready · changes autosave locally");
     setStep(state.step);
   } catch (error) {

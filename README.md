@@ -20,6 +20,11 @@ Then open <http://localhost:4174>.
 - Save proficiency, skill proficiency, and mastery tracking
 - Guided build compass with live recommendations for proficient skills, mastery points, saves, traits, jutsu, rank, attacks, and damage
 - Step-by-step explanations and previous/next controls; every recommendation remains optional
+- Guided and freeform build styles, with optional GM override notes recorded in the statblock and JSON
+- Required-fix, balance-advisory, and design-note validation categories
+- Suggested, selected-only, action-type, rank, role-fit, and multi-keyword catalogue filters
+- Portable JSON schema v2 with readable catalogue references, source versions, and legacy import migration
+- Expandable rules-provenance panel explaining which source drives each calculation family
 - Turn coverage checks for actions, bonus actions, and reactions
 - Tactical plan and print-ready statblock
 - Reusable adversary roster with browser autosave
