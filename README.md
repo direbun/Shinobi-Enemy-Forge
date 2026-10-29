@@ -2,6 +2,19 @@
 
 A separate local-first Naruto 5e adversary builder based on the supplied official adversary workbook and the encounter guidance in the Kage Guide.
 
+## Upload to GitHub
+
+Upload the **contents of this folder** to the root of a new GitHub repository. Keep the `data`, `tests`, and `tools` folders intact.
+
+To host it with GitHub Pages:
+
+1. Open the repository's **Settings**.
+2. Select **Pages**.
+3. Under **Build and deployment**, choose **Deploy from a branch**.
+4. Select the `main` branch and the `/ (root)` folder, then save.
+
+The application is static and needs no package installation or build step.
+
 ## Run it
 
 From PowerShell in this folder:

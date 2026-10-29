@@ -1,4 +1,4 @@
-import { ABILITIES, RANK_ORDER, auditEnemy, calculateEncounter, calculateEnemy, calculateGuidelines, defaultEnemy, exportEnemyDocument, importEnemyDocument, signed, validateEnemy } from "./model.mjs";
+import { ABILITIES, RANK_ORDER, auditEnemy, calculateEncounter, calculateEnemy, calculateGuidelines, defaultEnemy, exportEnemyDocument, importEnemyDocument, signed, validateEnemy } from "./model.mjs?v=2";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -530,7 +530,19 @@ function bindEvents() {
   });
   $("#new-enemy").addEventListener("click", () => { state.enemy = defaultEnemy(rules); syncForm(); commit("New adversary started"); setStep("forge"); });
   $("#save-roster").addEventListener("click", () => { const index = state.roster.findIndex((enemy) => enemy.id === state.enemy.id); const snapshot = hydrateEnemy(JSON.parse(JSON.stringify(state.enemy))); if (index >= 0) state.roster[index] = snapshot; else state.roster.push(snapshot); persist("Saved to adversary roster"); renderEncounter(); showNotice(`${state.enemy.name} saved to the roster.`); });
-  $("#export-json").addEventListener("click", () => { const document = exportEnemyDocument(rules, state.enemy); const blob = new Blob([JSON.stringify(document, null, 2)], { type: "application/json" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${(state.enemy.name || "adversary").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase()}.json`; link.click(); URL.revokeObjectURL(link.href); showNotice("Portable JSON exported with readable catalogue references."); });
+  $("#export-json").addEventListener("click", () => {
+    const exportDocument = exportEnemyDocument(rules, state.enemy);
+    const blob = new Blob([JSON.stringify(exportDocument, null, 2)], { type: "application/json" });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = window.document.createElement("a");
+    link.href = objectUrl;
+    link.download = `${(state.enemy.name || "adversary").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase()}.json`;
+    window.document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    showNotice("Portable JSON exported with readable catalogue references.");
+  });
   $("#import-json").addEventListener("change", async (event) => { const file = event.target.files?.[0]; if (!file) return; try { const parsed = JSON.parse(await file.text()); if (parsed.format && parsed.format !== "threat-forge") throw new Error("Unsupported format"); const imported = importEnemyDocument(rules, parsed); state.enemy = hydrateEnemy(imported.enemy); syncForm(); commit("Imported adversary JSON"); const sourceNote = imported.source?.version && imported.source.version !== rules.source.version ? ` Source sheet ${imported.source.version} was remapped to ${rules.source.version}.` : ""; showNotice(`Adversary imported${imported.migratedFrom < 2 ? " and migrated to the current format" : ""}.${sourceNote}`); } catch { showNotice("That file is not valid Threat Forge JSON."); } event.target.value = ""; });
   $("#add-custom-action").addEventListener("click", () => { const name = $("#custom-action-name").value.trim(); if (!name) return showNotice("Give the custom action a name first."); state.enemy.customActions.push({ id: crypto.randomUUID(), name, type: $("#custom-action-type").value, detail: $("#custom-action-detail").value.trim() }); $("#custom-action-name").value = ""; $("#custom-action-detail").value = ""; commit("Custom action added"); });
   $("#print-statblock").addEventListener("click", () => window.print());
